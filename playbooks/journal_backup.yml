@@ -1,0 +1,66 @@
+---
+- name: Backup journal to remote GitHub repo
+  hosts: localhost
+  vars:
+    source_dir: "{{ lookup('env', 'HOME') }}/workspace/journal"
+    remote_repo: "git@github.com:MadhurToppo/journal.git"
+    git_user_name: "Madhur Toppo"
+    git_user_email: "madhur.toppo@gmail.com"
+
+  tasks:
+    - name: Initialize Git repository if missing
+      command: git init
+      args:
+        chdir: "{{ source_dir }}"
+      register: git_init
+      changed_when: "'Initialized empty Git repository' in git_init.stdout"
+
+    - name: Ensure remote origin is set
+      shell: |
+        if git remote get-url origin > /dev/null 2>&1; then
+          git remote set-url origin {{ remote_repo }}
+        else
+          git remote add origin {{ remote_repo }}
+        fi
+      args:
+        chdir: "{{ source_dir }}"
+
+    - name: Configure Git user
+      command: git config user.name "{{ git_user_name }}"
+      args:
+        chdir: "{{ source_dir }}"
+
+    - name: Configure Git email
+      command: git config user.email "{{ git_user_email }}"
+      args:
+        chdir: "{{ source_dir }}"
+
+    - name: Remove unwanted cache/temp files before commit
+      shell: |
+        find "{{ source_dir }}" -type d \( -name ".cache" -o -name "Cache" \) -prune -exec rm -rf {} +
+        find "{{ source_dir }}" -type f \( -name "*.tmp" -o -name "*.log" \) -delete
+      changed_when: false
+
+    - name: Stage all changes
+      command: git add -A
+      args:
+        chdir: "{{ source_dir }}"
+
+    - name: Check for differences (non-failing)
+      shell: git diff --cached --quiet || echo "CHANGED"
+      args:
+        chdir: "{{ source_dir }}"
+      register: git_diff_check
+      changed_when: false
+
+    - name: Commit changes if any
+      command: >
+        git commit -m "Backup of journal on {{ lookup('pipe', 'date +%Y-%m-%d_%H-%M-%S') }}"
+      args:
+        chdir: "{{ source_dir }}"
+      when: "'CHANGED' in git_diff_check.stdout"
+
+    - name: Push backup to GitHub
+      command: git push origin main
+      args:
+        chdir: "{{ source_dir }}"
